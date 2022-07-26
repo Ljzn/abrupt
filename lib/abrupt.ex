@@ -118,7 +118,8 @@ defmodule Abrupt do
     },
     %{
       name: :script_pub_key,
-      type: {:vec, :byte}
+      type: {:vec, :byte},
+      transformer: :only_p2pkh
     },
     %{
       name: :value,
@@ -185,14 +186,6 @@ defmodule Abrupt do
     end
   end
 
-  def decode(bin, [{:alt, type} | t] = _stack, [ah | at] = _alt) when is_integer(ah) do
-    decode(bin, [{ah, type}, {:collect, ah} | t], at)
-  end
-
-  def decode(bin, [{:alt, type} | t] = _stack, [{:hash, _} = ah1, ah2 | at] = _alt) do
-    decode(bin, [{:alt, type} | t], [ah2, ah1 | at])
-  end
-
   def decode(bin, [{0, _type} | t], alt) do
     decode(bin, t, alt)
   end
@@ -204,6 +197,24 @@ defmodule Abrupt do
 
   def decode(<<>>, [], alt) do
     {:done, Enum.reverse(alt)}
+  end
+
+  # edit alt
+
+  def decode(bin, [{:transform, f} | t], [{:hash, _} = ah1, ah2 | at]) do
+    decode(bin, t, [ah1, apply(__MODULE__, f, [ah2]) | at])
+  end
+
+  def decode(bin, [{:transform, f} | t], [ah | at]) do
+    decode(bin, t, [apply(__MODULE__, f, [ah]) | at])
+  end
+
+  def decode(bin, [{:alt, type} | t] = _stack, [ah | at] = _alt) when is_integer(ah) do
+    decode(bin, [{ah, type}, {:collect, ah} | t], at)
+  end
+
+  def decode(bin, [{:alt, type} | t] = _stack, [{:hash, _} = ah1, ah2 | at] = _alt) do
+    decode(bin, [{:alt, type} | t], [ah2, ah1 | at])
   end
 
   ##############################################################
@@ -253,6 +264,7 @@ defmodule Abrupt do
 
   for %{type: type, name: name} = d <- @defs do
     hash = d[:hash]
+    transformer = d[:transformer]
 
     cond do
       is_list(type) ->
@@ -276,7 +288,11 @@ defmodule Abrupt do
         def parse(_bin, unquote(name)) do
           {
             :op,
-            {:type, unquote(type)}
+            if unquote(transformer) do
+              [{:type, unquote(type)}, {:transform, unquote(transformer)}]
+            else
+              {:type, unquote(type)}
+            end
           }
         end
     end
@@ -306,5 +322,21 @@ defmodule Abrupt do
   def final_hash(hash) do
     <<a::256-little>> = :crypto.hash(:sha256, :crypto.hash_final(hash))
     Base.encode16(<<a::256-big>>, case: :lower)
+  end
+
+  # transformers
+
+  def only_p2pkh(script) when length(script) == 25 do
+    case IO.iodata_to_binary(script) do
+      <<0x76, 0xA9, 0x14, _::160, 0x88, 0xAC>> = s ->
+        s
+
+      _ ->
+        nil
+    end
+  end
+
+  def only_p2pkh(_) do
+    nil
   end
 end

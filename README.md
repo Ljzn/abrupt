@@ -6,6 +6,6 @@ Parse binary BSV block data, can stop at half.
 
 - [x] calculate hash of block and tx
 - [x] continue decode
-- [ ] decode address
-- [ ] optional filter
+- [ ] ~~decode address~~
+- [ ] ~~optional filter~~
 - [ ] optimize bytes
