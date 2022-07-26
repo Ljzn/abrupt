@@ -3,19 +3,16 @@ defmodule Abrupt do
   Documentation for `Abrupt`.
   """
 
-  def read_part() do
-    File.stream!("./data/blk.dat", [], 1024)
-    |> Stream.map(fn chunk -> chunk end)
-    |> Enum.into([])
-    |> Enum.reduce(decode_init(), fn bin, state ->
-      decode_update(state, bin)
-    end)
-  end
+  @doc """
 
+  """
   def decode_init(data \\ "") do
     {:abrupt, data, [type: :block], []}
   end
 
+  @doc """
+
+  """
   def decode_update({:abrupt, rest, stack, alt}, bin) do
     decode(rest <> bin, stack, alt)
   end
@@ -129,15 +126,15 @@ defmodule Abrupt do
     }
   ]
 
-  def decode(bin, [:hash_start | t], alt) do
+  defp decode(bin, [:hash_start | t], alt) do
     decode(bin, t, [{:hash, :crypto.hash_init(:sha256)} | alt])
   end
 
-  def decode(bin, [:hash_stop, {:collect, _} = c | t], [{:hash, hash} | alt]) do
+  defp decode(bin, [:hash_stop, {:collect, _} = c | t], [{:hash, hash} | alt]) do
     decode(bin, [c, {:tag, :hash, final_hash(hash)} | t], alt)
   end
 
-  def decode(bin, [{:tag, k, v} | t], [ah | at]) do
+  defp decode(bin, [{:tag, k, v} | t], [ah | at]) do
     ah =
       if is_map(ah) do
         Map.put(ah, k, v)
@@ -148,7 +145,7 @@ defmodule Abrupt do
     decode(bin, t, [ah | at])
   end
 
-  def decode(bin, [{:type, type} | t] = stack, alt) do
+  defp decode(bin, [{:type, type} | t] = stack, alt) do
     case parse(bin, type) do
       :abrupt ->
         {:abrupt, bin, stack, alt}
@@ -176,7 +173,7 @@ defmodule Abrupt do
     end
   end
 
-  def decode(bin, [{:collect, n} | t], alt) when is_integer(n) do
+  defp decode(bin, [{:collect, n} | t], alt) when is_integer(n) do
     case alt do
       [{:hash, hash} | alt] ->
         {collect, alt} = Enum.split(alt, n)
@@ -188,38 +185,38 @@ defmodule Abrupt do
     end
   end
 
-  def decode(bin, [{0, _type} | t], alt) do
+  defp decode(bin, [{0, _type} | t], alt) do
     decode(bin, t, alt)
   end
 
   # FIXME: optimize the bytes
-  def decode(bin, [{n, type} | t], alt) when is_integer(n) do
+  defp decode(bin, [{n, type} | t], alt) when is_integer(n) do
     decode(bin, [{:type, type}, {n - 1, type} | t], alt)
   end
 
-  def decode(<<>>, [], alt) do
+  defp decode(<<>>, [], alt) do
     {:done, Enum.reverse(alt)}
   end
 
   # edit alt
 
-  def decode(bin, [{:transform, f} | t], [{:hash, _} = ah1, ah2 | at]) do
+  defp decode(bin, [{:transform, f} | t], [{:hash, _} = ah1, ah2 | at]) do
     decode(bin, t, [ah1, apply(__MODULE__, f, [ah2]) | at])
   end
 
-  def decode(bin, [{:transform, f} | t], [ah | at]) do
+  defp decode(bin, [{:transform, f} | t], [ah | at]) do
     decode(bin, t, [apply(__MODULE__, f, [ah]) | at])
   end
 
-  def decode(bin, [:concat | t], [{:hash, _} = ah1, ah2, ah3 | at]) do
+  defp decode(bin, [:concat | t], [{:hash, _} = ah1, ah2, ah3 | at]) do
     decode(bin, t, [ah1, ah3 <> ah2 | at])
   end
 
-  def decode(bin, [:concat | t], [ah1, ah2 | at]) do
+  defp decode(bin, [:concat | t], [ah1, ah2 | at]) do
     decode(bin, t, [ah2 <> ah1 | at])
   end
 
-  def decode(bin, [{:alt, type} | t] = _stack, [ah | at] = _alt) when is_integer(ah) do
+  defp decode(bin, [{:alt, type} | t] = _stack, [ah | at] = _alt) when is_integer(ah) do
     case type do
       :byte ->
         decode(bin, [{:type, {:bytes, ah}} | t], at)
@@ -229,7 +226,7 @@ defmodule Abrupt do
     end
   end
 
-  def decode(bin, [{:alt, type} | t] = _stack, [{:hash, _} = ah1, ah2 | at] = _alt) do
+  defp decode(bin, [{:alt, type} | t] = _stack, [{:hash, _} = ah1, ah2 | at] = _alt) do
     decode(bin, [{:alt, type} | t], [ah2, ah1 | at])
   end
 
@@ -237,11 +234,11 @@ defmodule Abrupt do
 
   # basic types
 
-  def parse(_bin, {:bytes, 0}) do
+  defp parse(_bin, {:bytes, 0}) do
     {:op, []}
   end
 
-  def parse(bin, {:bytes, n}) when byte_size(bin) > 0 do
+  defp parse(bin, {:bytes, n}) when byte_size(bin) > 0 do
     s = byte_size(bin)
 
     if s >= n do
@@ -260,38 +257,38 @@ defmodule Abrupt do
     end
   end
 
-  def parse(<<a::32-signed-little, rest::bytes>>, :int32) do
+  defp parse(<<a::32-signed-little, rest::bytes>>, :int32) do
     {a, rest}
   end
 
-  def parse(<<a::64-signed-little, rest::bytes>>, :int64) do
+  defp parse(<<a::64-signed-little, rest::bytes>>, :int64) do
     {a, rest}
   end
 
-  def parse(<<a::32-little, rest::bytes>>, :uint32) do
+  defp parse(<<a::32-little, rest::bytes>>, :uint32) do
     {a, rest}
   end
 
-  def parse(<<a::256-little, rest::bytes>>, :hash) do
+  defp parse(<<a::256-little, rest::bytes>>, :hash) do
     a = <<a::256-big>>
     {Base.encode16(a, case: :lower), rest}
   end
 
   # varint
 
-  def parse(<<a::8, rest::bytes>>, :varint) when a < 0xFD do
+  defp parse(<<a::8, rest::bytes>>, :varint) when a < 0xFD do
     {a, rest}
   end
 
-  def parse(<<0xFD, a::16-little, rest::bytes>>, :varint) do
+  defp parse(<<0xFD, a::16-little, rest::bytes>>, :varint) do
     {a, rest}
   end
 
-  def parse(<<0xFE, a::32-little, rest::bytes>>, :varint) do
+  defp parse(<<0xFE, a::32-little, rest::bytes>>, :varint) do
     {a, rest}
   end
 
-  def parse(<<0xFF, a::64-little, rest::bytes>>, :varint) do
+  defp parse(<<0xFF, a::64-little, rest::bytes>>, :varint) do
     {a, rest}
   end
 
@@ -303,7 +300,7 @@ defmodule Abrupt do
 
     cond do
       is_list(type) ->
-        def parse(_bin, unquote(name)) do
+        defp parse(_bin, unquote(name)) do
           content = Enum.map(unquote(type), fn x -> {:type, x} end)
 
           content =
@@ -320,7 +317,7 @@ defmodule Abrupt do
         end
 
       true ->
-        def parse(_bin, unquote(name)) do
+        defp parse(_bin, unquote(name)) do
           {
             :op,
             if unquote(transformer) do
@@ -335,7 +332,7 @@ defmodule Abrupt do
 
   # vec
 
-  def parse(_bin, {:vec, type}) do
+  defp parse(_bin, {:vec, type}) do
     {
       :op,
       [{:type, :varint}, {:alt, type}]
@@ -344,7 +341,7 @@ defmodule Abrupt do
 
   # not match
 
-  def parse(_, _) do
+  defp parse(_, _) do
     :abrupt
   end
 
