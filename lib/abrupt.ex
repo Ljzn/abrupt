@@ -3,12 +3,21 @@ defmodule Abrupt do
   Documentation for `Abrupt`.
   """
 
-  def read_part(n) do
+  def read_part() do
     File.stream!("./data/blk.dat", [], 1024)
     |> Stream.map(fn chunk -> chunk end)
-    |> Stream.take(n)
-    |> Enum.into(<<>>)
-    |> decode([type: :block], [])
+    |> Enum.into([])
+    |> Enum.reduce(decode_init(), fn bin, state ->
+      decode_update(state, bin)
+    end)
+  end
+
+  def decode_init(data \\ "") do
+    {:abrupt, data, [type: :block], []}
+  end
+
+  def decode_update({:abrupt, rest, stack, alt}, bin) do
+    decode(rest <> bin, stack, alt)
   end
 
   @defs [
@@ -28,7 +37,8 @@ defmodule Abrupt do
         :time,
         :bits,
         :nonce
-      ]
+      ],
+      hash: true
     },
     %{
       name: :version,
@@ -61,7 +71,8 @@ defmodule Abrupt do
         {:vec, :tx_in},
         {:vec, :tx_out},
         :lock_time
-      ]
+      ],
+      hash: true
     },
     %{
       name: :tx_in,
@@ -115,6 +126,25 @@ defmodule Abrupt do
     }
   ]
 
+  def decode(bin, [:hash_start | t], alt) do
+    decode(bin, t, [{:hash, :crypto.hash_init(:sha256)} | alt])
+  end
+
+  def decode(bin, [:hash_stop, {:collect, _} = c | t], [{:hash, hash} | alt]) do
+    decode(bin, [c, {:tag, :hash, final_hash(hash)} | t], alt)
+  end
+
+  def decode(bin, [{:tag, k, v} | t], [ah | at]) do
+    ah =
+      if is_map(ah) do
+        Map.put(ah, k, v)
+      else
+        %{:data => ah, k => v}
+      end
+
+    decode(bin, t, [ah | at])
+  end
+
   def decode(bin, [{:type, type} | t] = stack, alt) do
     case parse(bin, type) do
       :abrupt ->
@@ -127,17 +157,40 @@ defmodule Abrupt do
         decode(bin, [op | t], alt)
 
       {a, rest} ->
-        decode(rest, t, [a | alt])
+        case alt do
+          [{:hash, hash} | alt] ->
+            consumed =
+              case rest do
+                <<>> -> bin
+                _ -> String.trim_trailing(bin, rest)
+              end
+
+            decode(rest, t, [{:hash, hash(hash, consumed)}, a | alt])
+
+          _ ->
+            decode(rest, t, [a | alt])
+        end
     end
   end
 
   def decode(bin, [{:collect, n} | t], alt) when is_integer(n) do
-    {collect, alt} = Enum.split(alt, n)
-    decode(bin, t, [Enum.reverse(collect) | alt])
+    case alt do
+      [{:hash, hash} | alt] ->
+        {collect, alt} = Enum.split(alt, n)
+        decode(bin, t, [{:hash, hash}, Enum.reverse(collect) | alt])
+
+      alt ->
+        {collect, alt} = Enum.split(alt, n)
+        decode(bin, t, [Enum.reverse(collect) | alt])
+    end
   end
 
   def decode(bin, [{:alt, type} | t] = _stack, [ah | at] = _alt) when is_integer(ah) do
     decode(bin, [{ah, type}, {:collect, ah} | t], at)
+  end
+
+  def decode(bin, [{:alt, type} | t] = _stack, [{:hash, _} = ah1, ah2 | at] = _alt) do
+    decode(bin, [{:alt, type} | t], [ah2, ah1 | at])
   end
 
   def decode(bin, [{0, _type} | t], alt) do
@@ -148,6 +201,14 @@ defmodule Abrupt do
   def decode(bin, [{n, type} | t], alt) when is_integer(n) do
     decode(bin, [{:type, type}, {n - 1, type} | t], alt)
   end
+
+  def decode(<<>>, [], alt) do
+    {:done, Enum.reverse(alt)}
+  end
+
+  ##############################################################
+
+  # basic types
 
   def parse(<<a, rest::bytes>>, :byte) do
     {a, rest}
@@ -170,6 +231,8 @@ defmodule Abrupt do
     {Base.encode16(a, case: :lower), rest}
   end
 
+  # varint
+
   def parse(<<a::8, rest::bytes>>, :varint) when a < 0xFD do
     {a, rest}
   end
@@ -186,13 +249,26 @@ defmodule Abrupt do
     {a, rest}
   end
 
-  for %{type: type, name: name} <- @defs do
+  # complex types
+
+  for %{type: type, name: name} = d <- @defs do
+    hash = d[:hash]
+
     cond do
       is_list(type) ->
         def parse(_bin, unquote(name)) do
+          content = Enum.map(unquote(type), fn x -> {:type, x} end)
+
+          content =
+            if unquote(hash) do
+              [:hash_start] ++ content ++ [:hash_stop]
+            else
+              content
+            end
+
           {
             :op,
-            Enum.map(unquote(type), fn x -> {:type, x} end) ++ [{:collect, length(unquote(type))}]
+            content ++ [{:collect, length(unquote(type))}]
           }
         end
 
@@ -206,6 +282,8 @@ defmodule Abrupt do
     end
   end
 
+  # vec
+
   def parse(_bin, {:vec, type}) do
     {
       :op,
@@ -213,7 +291,20 @@ defmodule Abrupt do
     }
   end
 
+  # not match
+
   def parse(_, _) do
     :abrupt
+  end
+
+  ## hashing
+
+  def hash(a, b) do
+    :crypto.hash_update(a, b)
+  end
+
+  def final_hash(hash) do
+    <<a::256-little>> = :crypto.hash(:sha256, :crypto.hash_final(hash))
+    Base.encode16(<<a::256-big>>, case: :lower)
   end
 end
