@@ -16,26 +16,22 @@ defmodule AbruptTest do
           alt = filter_alt(alt, filter)
           {:abrupt, rest, stack, alt}
 
-        {:done, [[header, txs]]} ->
-          [header, filter_alt(txs, filter)]
+        {:done, alt} ->
+          {:done, filter_alt(alt, filter)}
       end
     end)
     |> IO.inspect()
   end
 
   def filter_alt(alt, filter) do
-    Enum.map(alt, fn
-      %{data: [_, _, outputs, _]} = x ->
-        if Enum.any?(outputs, fn [_, script] ->
-             filter.(script)
-           end) do
-          x
-        else
-          nil
-        end
+    Enum.filter(alt, fn
+      %{data: [_, _, outputs, _]} ->
+        Enum.any?(outputs, fn [_, script] ->
+          filter.(script)
+        end)
 
-      x ->
-        x
+      _ ->
+        true
     end)
   end
 end

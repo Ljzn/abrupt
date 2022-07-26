@@ -7,7 +7,11 @@ defmodule Abrupt do
 
   """
   def decode_init(data \\ "") do
-    {:abrupt, data, [type: :block], []}
+    {:abrupt, data,
+     [
+       {:type, :block_header},
+       {:type, {:vec_unpacked, :tx}}
+     ], []}
   end
 
   @doc """
@@ -20,13 +24,6 @@ defmodule Abrupt do
   @large_bytes_threshold 25
 
   @defs [
-    %{
-      name: :block,
-      type: [
-        :block_header,
-        {:vec, :tx}
-      ]
-    },
     %{
       name: :block_header,
       type: [
@@ -222,7 +219,13 @@ defmodule Abrupt do
         decode(bin, [{:type, {:bytes, ah}} | t], at)
 
       _ ->
-        decode(bin, [{ah, type}, {:collect, ah} | t], at)
+        case t do
+          [:no_collect | t] ->
+            decode(bin, [{ah, type} | t], at)
+
+          _ ->
+            decode(bin, [{ah, type}, {:collect, ah} | t], at)
+        end
     end
   end
 
@@ -336,6 +339,13 @@ defmodule Abrupt do
     {
       :op,
       [{:type, :varint}, {:alt, type}]
+    }
+  end
+
+  defp parse(_bin, {:vec_unpacked, type}) do
+    {
+      :op,
+      [{:type, :varint}, {:alt, type}, :no_collect]
     }
   end
 
