@@ -133,7 +133,7 @@ defmodule Abrupt do
 
   def decode(bin, [{:collect, n} | t], alt) when is_integer(n) do
     {collect, alt} = Enum.split(alt, n)
-    decode(bin, t, [collect | alt])
+    decode(bin, t, [Enum.reverse(collect) | alt])
   end
 
   def decode(bin, [{:alt, type} | t] = _stack, [ah | at] = _alt) when is_integer(ah) do
@@ -153,15 +153,15 @@ defmodule Abrupt do
     {a, rest}
   end
 
-  def parse(<<a::32-signed, rest::bytes>>, :int32) do
+  def parse(<<a::32-signed-little, rest::bytes>>, :int32) do
     {a, rest}
   end
 
-  def parse(<<a::64-signed, rest::bytes>>, :int64) do
+  def parse(<<a::64-signed-little, rest::bytes>>, :int64) do
     {a, rest}
   end
 
-  def parse(<<a::32, rest::bytes>>, :uint32) do
+  def parse(<<a::32-little, rest::bytes>>, :uint32) do
     {a, rest}
   end
 
@@ -192,7 +192,7 @@ defmodule Abrupt do
         def parse(_bin, unquote(name)) do
           {
             :op,
-            Enum.map(unquote(type), fn x -> {:type, x} end)
+            Enum.map(unquote(type), fn x -> {:type, x} end) ++ [{:collect, length(unquote(type))}]
           }
         end
 
