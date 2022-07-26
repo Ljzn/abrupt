@@ -8,4 +8,4 @@ Parse binary BSV block data, can stop at half.
 - [x] continue decode
 - [ ] ~~decode address~~
 - [ ] ~~optional filter~~
-- [ ] optimize bytes
+- [x] optimize bytes

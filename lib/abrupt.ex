@@ -20,6 +20,8 @@ defmodule Abrupt do
     decode(rest <> bin, stack, alt)
   end
 
+  @large_bytes_threshold 25
+
   @defs [
     %{
       name: :block,
@@ -209,8 +211,22 @@ defmodule Abrupt do
     decode(bin, t, [apply(__MODULE__, f, [ah]) | at])
   end
 
+  def decode(bin, [:concat | t], [{:hash, _} = ah1, ah2, ah3 | at]) do
+    decode(bin, t, [ah1, ah3 <> ah2 | at])
+  end
+
+  def decode(bin, [:concat | t], [ah1, ah2 | at]) do
+    decode(bin, t, [ah2 <> ah1 | at])
+  end
+
   def decode(bin, [{:alt, type} | t] = _stack, [ah | at] = _alt) when is_integer(ah) do
-    decode(bin, [{ah, type}, {:collect, ah} | t], at)
+    case type do
+      :byte ->
+        decode(bin, [{:type, {:bytes, ah}} | t], at)
+
+      _ ->
+        decode(bin, [{ah, type}, {:collect, ah} | t], at)
+    end
   end
 
   def decode(bin, [{:alt, type} | t] = _stack, [{:hash, _} = ah1, ah2 | at] = _alt) do
@@ -221,8 +237,27 @@ defmodule Abrupt do
 
   # basic types
 
-  def parse(<<a, rest::bytes>>, :byte) do
-    {a, rest}
+  def parse(_bin, {:bytes, 0}) do
+    {:op, []}
+  end
+
+  def parse(bin, {:bytes, n}) when byte_size(bin) > 0 do
+    s = byte_size(bin)
+
+    if s >= n do
+      if n > @large_bytes_threshold do
+        {"-", :binary.part(bin, n, s - n)}
+      else
+        {:binary.part(bin, 0, n), :binary.part(bin, n, s - n)}
+      end
+    else
+      {:op,
+       [
+         {:type, {:bytes, s}},
+         {:type, {:bytes, n - s}},
+         :concat
+       ]}
+    end
   end
 
   def parse(<<a::32-signed-little, rest::bytes>>, :int32) do
@@ -326,14 +361,8 @@ defmodule Abrupt do
 
   # transformers
 
-  def only_p2pkh(script) when length(script) == 25 do
-    case IO.iodata_to_binary(script) do
-      <<0x76, 0xA9, 0x14, _::160, 0x88, 0xAC>> = s ->
-        s
-
-      _ ->
-        nil
-    end
+  def only_p2pkh(<<0x76, 0xA9, 0x14, _::160, 0x88, 0xAC>> = script) do
+    script
   end
 
   def only_p2pkh(_) do
